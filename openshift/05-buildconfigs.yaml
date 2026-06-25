@@ -1,0 +1,63 @@
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: banking-api
+  namespace: banking-demo
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: banking-api
+  namespace: banking-demo
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: banking-api:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/YOUR_USERNAME/mini-banking-dash.git
+      ref: main
+    contextDir: backend
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  triggers:
+    - type: ConfigChange
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: banking-frontend
+  namespace: banking-demo
+spec:
+  lookupPolicy:
+    local: true
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: banking-frontend
+  namespace: banking-demo
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: banking-frontend:latest
+  source:
+    type: Git
+    git:
+      uri: https://github.com/YOUR_USERNAME/mini-banking-dash.git
+      ref: main
+    contextDir: frontend
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  triggers:
+    - type: ConfigChange

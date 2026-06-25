@@ -1,0 +1,459 @@
+================================================================================
+  MINI BANKING DASHBOARD — PROJECT INSTRUCTION
+  Demo OpenShift TAM Interview | Red Hat
+================================================================================
+
+Mục đích project
+----------------
+Project demo 3-tier (Frontend → API → PostgreSQL) mô phỏng dashboard giao dịch
+ngân hàng. Dùng để trình bày trong 20-30 phút:
+  1. Deploy ứng dụng lên OpenShift
+  2. Scale tự động (HPA)
+  3. Giám sát qua OpenShift Console
+  4. CI/CD deploy tự động
+
+Chiến lược phát triển
+---------------------
+  Bước 1: Test LOCAL bằng Docker Compose (docker-compose.yml)
+  Bước 2: Deploy lên OpenShift Local bằng manifest trong openshift/
+  Bước 3: Setup CI/CD qua GitHub Actions (.github/workflows/)
+
+Câu trả lời ngắn: CÓ — làm Docker trước rồi deploy OpenShift sau là cách đúng.
+Docker Compose giúp debug nhanh; manifest OpenShift dùng cùng Dockerfile.
+
+
+================================================================================
+PHẦN 1 — KIẾN TRÚC TỔNG QUAN
+================================================================================
+
+  [Browser]
+      |
+      v
+  [Frontend Pod - nginx:8080]  ----proxy /api---->  [Backend Pod - FastAPI:8000]
+                                                              |
+                                                              v
+                                                    [PostgreSQL Pod - :5432]
+
+Luồng request (FLOW)
+--------------------
+  1. User mở browser → truy cập Frontend (port 8080 local / Route trên OCP)
+  2. Frontend serve file tĩnh: index.html, app.js, style.css
+  3. app.js gọi API qua nginx reverse proxy:
+       GET  /api/transactions      → danh sách giao dịch
+       GET  /api/stats             → thống kê dashboard
+       POST /api/transactions/generate → tạo giao dịch ngẫu nhiên (demo scale)
+       GET  /health                → health check (OpenShift probe)
+       GET  /ready                 → readiness (check DB)
+       GET  /metrics               → metrics cơ bản
+  4. Backend đọc/ghi PostgreSQL qua SQLAlchemy
+  5. Khi load cao → HPA tăng số pod backend → demo scale trên Console
+
+Service Discovery (OpenShift/K8s)
+---------------------------------
+  Trong cluster, các service gọi nhau qua DNS nội bộ:
+    banking-api:8000     → Backend Service
+    postgresql:5432      → Database Service
+    banking-frontend:8080 → Frontend Service
+
+  nginx.conf proxy_pass trỏ tới http://banking-api:8000 — tên trùng tên Service.
+
+
+================================================================================
+PHẦN 2 — CẤU TRÚC TH� MỤC & CÔNG DỤNG TỪNG FILE
+================================================================================
+
+mini-banking-dash/
+|
+|-- instruction.txt          ← File này. Tài liệu chi tiết toàn project.
+|-- docker-compose.yml     ← Chạy full stack local (postgres + api + frontend)
+|-- .gitignore             ← Loại trừ file không commit (venv, cache, ...)
+|
+|-- backend/               ← SERVICE 2: REST API (Python FastAPI)
+|   |-- Dockerfile         ← Build image backend cho Docker & OpenShift
+|   |-- .dockerignore      ← File bỏ qua khi build image
+|   |-- requirements.txt   ← Python dependencies
+|   └── app/
+|       |-- __init__.py    ← Package marker (Python module)
+|       |-- main.py        ← FastAPI app, tất cả HTTP endpoints
+|       |-- models.py      ← SQLAlchemy model Transaction (bảng DB)
+|       |-- schemas.py     ← Pydantic schemas validate request/response
+|       |-- database.py    ← Kết nối PostgreSQL, session factory
+|       └── seed.py        ← Fake data + hàm generate transaction ngẫu nhiên
+|
+|-- frontend/              ← SERVICE 1: Dashboard UI (HTML + nginx)
+|   |-- Dockerfile         ← Build image nginx + static files
+|   |-- .dockerignore
+|   |-- index.html         ← Giao diện dashboard (Tailwind CDN)
+|   |-- app.js             ← Logic fetch API, render bảng, nút Generate
+|   |-- style.css          ← Theme colors (blue/red/green cho rolling update demo)
+|   └── nginx.conf         ← Reverse proxy /api → backend, serve static files
+|
+|-- openshift/             ← Manifest deploy lên OpenShift/Kubernetes
+|   |-- 00-namespace.yaml  ← Tạo project banking-demo
+|   |-- 01-postgresql.yaml ← Secret, PVC, Deployment, Service cho PostgreSQL
+|   |-- 02-backend-deployment.yaml ← Deployment + Service backend (probes, env)
+|   |-- 03-backend-hpa.yaml        ← HorizontalPodAutoscaler (1→5 pods)
+|   |-- 04-frontend-deployment.yaml ← Deployment + Service + Route (URL public)
+|   └── 05-buildconfigs.yaml       ← ImageStream + BuildConfig build từ Git
+|
+|-- scripts/
+|   |-- crc-setup.ps1      ← Helper cài OpenShift Local trên Windows
+|   |-- load-test.sh       ← Script tạo load để trigger HPA scale
+|   └── demo-script.md     ← Script nói cho buổi demo 20-30 phút
+|
+└── .github/
+    └── workflows/
+        └── deploy-openshift.yaml ← CI/CD: push code → build → deploy OCP
+
+
+================================================================================
+PHẦN 3 — BACKEND: CHI TIẾT CODE & FUNCTIONS
+================================================================================
+
+File: backend/app/database.py
+-----------------------------
+  DATABASE_URL  — Lấy từ env var, default local postgres
+  engine        — SQLAlchemy engine kết nối PostgreSQL
+  SessionLocal  — Factory tạo DB session
+  Base          — Base class cho models
+  get_db()      — Dependency injection cho FastAPI, tự đóng session
+
+File: backend/app/models.py
+---------------------------
+  Class Transaction (bảng "transactions"):
+    id            — Primary key, auto increment
+    type          — "credit" | "debit" | "transfer"
+    amount        — Số tiền (float)
+    description   — Mô tả giao dịch
+    account_from  — Tài khoản nguồn
+    account_to    — Tài khoản đích
+    status        — "completed" | "pending"
+    created_at    — Timestamp
+
+File: backend/app/schemas.py
+----------------------------
+  TransactionCreate   — Validate body POST /api/transactions
+  TransactionResponse — Format JSON trả về client
+  StatsResponse       — Format thống kê dashboard
+
+File: backend/app/seed.py
+-------------------------
+  seed_transactions(db, count=20)
+    — Chèn 20 giao dịch fake khi DB trống (chạy lúc startup)
+  generate_random_transaction(db)
+    — Tạo 1 giao dịch ngẫu nhiên, dùng cho nút "Generate Transaction"
+
+File: backend/app/main.py — ENDPOINTS
+-------------------------------------
+
+  GET /health
+    Công dụng: Liveness probe — OpenShift check pod còn sống không
+    Response: { status, version, hostname }
+    hostname giúp demo: khi scale, mỗi pod có hostname khác nhau
+
+  GET /ready
+    Công dụng: Readiness probe — pod chỉ nhận traffic khi DB OK
+    Thực hiện: SELECT 1 trên PostgreSQL
+    Response: { status: "ready", database: "connected" }
+
+  GET /metrics
+    Công dụng: Metrics cơ bản cho demo monitoring
+    Response: { app_transactions_total, app_version_info, app_theme }
+
+  GET /api/config
+    Công dụng: Frontend đọc version + theme (đổi theme = rolling update demo)
+    Env vars: APP_VERSION, APP_THEME (blue | red | green)
+
+  GET /api/transactions?limit=20&offset=0
+    Công dụng: Lấy danh sách giao dịch, mới nhất trước
+    Response: Array of TransactionResponse
+
+  POST /api/transactions
+    Công dụng: Tạo giao dịch với body JSON hoặc không body (random)
+    Body (optional): { type, amount, description, account_from, account_to }
+
+  POST /api/transactions/generate
+    Công dụng: Tạo nhanh 1 giao dịch random — nút trên UI + load test
+
+  GET /api/stats
+    Công dụng: 4 stat cards trên dashboard
+    Response: { total_transactions, total_credit, total_debit, net_balance }
+
+  lifespan (startup hook)
+    — create_all tables nếu chưa có
+    — seed 20 transactions ban đầu
+
+Environment variables (Backend)
+  DATABASE_URL  — postgresql://user:pass@host:5432/dbname
+  APP_VERSION   — Hiển thị trên UI (default "1.0.0")
+  APP_THEME     — "blue" | "red" | "green" — đổi màu header (demo rolling update)
+
+
+================================================================================
+PHẦN 4 — FRONTEND: CHI TIẾT
+================================================================================
+
+File: frontend/index.html
+  — Layout dashboard: header, 4 stat cards, bảng transactions, system info
+  — Nút "Generate Transaction" và "Refresh"
+  — Health indicator (dot xanh/vàng/đỏ)
+  — Tailwind CSS qua CDN (không cần npm build)
+
+File: frontend/app.js — FUNCTIONS
+  formatCurrency(value)     — Format USD
+  formatDate(isoString)     — Format datetime locale
+  typeBadge(type)           — HTML badge màu theo loại giao dịch
+  setHealth(ok, message)    — Cập nhật health dot
+  checkHealth()             — GET /health
+  loadConfig()              — GET /api/config → apply theme class lên body
+  loadStats()               — GET /api/stats → fill stat cards
+  loadTransactions()        — GET /api/transactions → render table
+  refreshAll()              — Gọi tất cả load functions
+  generateTransaction()     — POST /api/transactions/generate
+  setInterval(checkHealth)  — Poll health mỗi 15 giây
+
+File: frontend/style.css
+  — CSS variables cho theme blue/red/green
+  — body.theme-red / body.theme-green đổi màu header, buttons, stat border
+  — Dùng cho demo rolling update: đổi APP_THEME env → redeploy → UI đổi màu
+
+File: frontend/nginx.conf
+  — Port 8080
+  — /           → serve static files
+  — /api/*      → proxy_pass http://banking-api:8000/api/*
+  — /health     → proxy backend health
+  — /ready      → proxy backend ready
+  — /metrics    → proxy backend metrics
+
+
+================================================================================
+PHẦN 5 — DOCKER LOCAL TEST
+================================================================================
+
+File: docker-compose.yml
+------------------------
+  Service postgres:
+    Image postgres:16-alpine
+    Port 5432, user/pass/db = banking/banking/banking
+    Healthcheck pg_isready
+    Volume postgres_data persist data
+
+  Service banking-api:
+    Build từ backend/Dockerfile
+    Env DATABASE_URL trỏ postgres service
+    Port 8000, depends_on postgres healthy
+    Healthcheck GET /health
+
+  Service banking-frontend:
+    Build từ frontend/Dockerfile
+    Port 8080, depends_on banking-api healthy
+    nginx proxy tới banking-api (tên service Docker network)
+
+CÁCH CHẠY LOCAL
+---------------
+  cd D:\mini-banking-dash
+  docker compose up --build
+
+  Mở browser:
+    Dashboard:  http://localhost:8080
+    API docs:   http://localhost:8000/docs
+    Health:     http://localhost:8000/health
+
+  Dừng:
+    docker compose down
+
+  Xóa data DB:
+    docker compose down -v
+
+File: backend/Dockerfile
+  python:3.12-slim → install deps → copy app → uvicorn port 8000
+
+File: frontend/Dockerfile
+  nginx:1.27-alpine → copy static + nginx.conf → port 8080
+
+
+================================================================================
+PHẦN 6 — OPENSHIFT DEPLOY
+================================================================================
+
+Thứ tự apply manifest
+-----------------------
+  oc login ... (xem scripts/crc-setup.ps1)
+  oc apply -f openshift/00-namespace.yaml
+  oc apply -f openshift/01-postgresql.yaml
+  oc wait --for=condition=ready pod -l app=postgresql -n banking-demo --timeout=120s
+
+  # Build images (chọn 1 cách):
+
+  Cách A — Binary build (không cần GitHub):
+    oc new-build --name=banking-api --strategy=docker --binary=true -n banking-demo
+    oc start-build banking-api --from-dir=./backend --follow -n banking-demo
+    oc new-build --name=banking-frontend --strategy=docker --binary=true -n banking-demo
+    oc start-build banking-frontend --from-dir=./frontend --follow -n banking-demo
+
+  Cách B — Git build (sau khi push GitHub, sửa URL trong 05-buildconfigs.yaml):
+    oc apply -f openshift/05-buildconfigs.yaml
+    oc start-build banking-api -n banking-demo
+    oc start-build banking-frontend -n banking-demo
+
+  oc apply -f openshift/02-backend-deployment.yaml
+  oc apply -f openshift/03-backend-hpa.yaml
+  oc apply -f openshift/04-frontend-deployment.yaml
+
+  # Lấy URL app:
+  oc get route banking-frontend -n banking-demo
+
+Chi tiết từng manifest OpenShift
+---------------------------------
+
+  00-namespace.yaml
+    Tạo Namespace banking-demo — cô lập resources
+
+  01-postgresql.yaml
+    Secret postgresql-secret     — credentials + DATABASE_URL
+    PVC postgresql-pvc           — disk 1Gi cho data
+    Deployment postgresql        — 1 replica postgres:16-alpine
+    Service postgresql           — ClusterIP port 5432
+
+  02-backend-deployment.yaml
+    Deployment banking-api
+      - image: banking-api:latest (từ ImageStream sau build)
+      - env DATABASE_URL từ Secret
+      - readinessProbe: GET /ready
+      - livenessProbe:  GET /health
+      - resources requests/limits (CPU/RAM cho HPA + monitoring)
+      - rollingUpdate maxUnavailable: 0 → zero downtime
+    Service banking-api — ClusterIP port 8000
+
+  03-backend-hpa.yaml
+    HorizontalPodAutoscaler banking-api-hpa
+      minReplicas: 1, maxReplicas: 5
+      target CPU 50%
+    Demo: chạy scripts/load-test.sh → xem pods tăng trên Console
+
+  04-frontend-deployment.yaml
+    Deployment banking-frontend — nginx + static
+    Service banking-frontend — port 8080
+    Route banking-frontend — URL public https://...apps-crc.testing
+      TLS edge termination (OpenShift Route feature)
+
+  05-buildconfigs.yaml
+    ImageStream + BuildConfig cho backend và frontend
+    Build từ Git repo (Docker strategy, dùng Dockerfile sẵn có)
+
+
+================================================================================
+PHẦN 7 — CI/CD (GitHub Actions)
+================================================================================
+
+File: .github/workflows/deploy-openshift.yaml
+
+  Trigger: push branch main hoặc manual workflow_dispatch
+
+  Steps:
+    1. Checkout code
+    2. Install oc CLI
+    3. Login OpenShift bằng secret OPENSHIFT_TOKEN
+    4. Binary build backend từ ./backend → deploy
+    5. Binary build frontend từ ./frontend → deploy
+    6. oc rollout status — đợi rollout xong
+
+  Setup secrets trên GitHub repo:
+    OPENSHIFT_TOKEN — token ServiceAccount có quyền edit project banking-demo
+
+  Tạo token trên OpenShift:
+    oc create sa github-deploy -n banking-demo
+    oc policy add-role-to-user edit system:serviceaccount:banking-demo:github-deploy
+    oc create token github-deploy -n banking-demo --duration=8760h
+
+
+================================================================================
+PHẦN 8 — DEMO SCENARIOS (20-30 PHÚT)
+================================================================================
+
+Scenario 1 — Deploy & Topology (5 phút)
+  Console → Developer → Topology → show 3 components linked
+  Giải thích: Pod, Service, Route, Secret
+
+Scenario 2 — Health & Monitoring (5 phút)
+  Console → Workloads → Pods → banking-api → Events, Logs
+  Show readiness/liveness probe config
+  Observe → Metrics → CPU/Memory per pod
+
+Scenario 3 — Scale (5 phút)
+  Terminal: bash scripts/load-test.sh <ROUTE_URL> 60
+  Console → Workloads → banking-api pods → watch replicas tăng
+  Giải thích HPA vs manual scale VM
+
+Scenario 4 — Rolling Update zero downtime (5 phút)
+  Đổi APP_THEME từ blue → red trong 02-backend-deployment.yaml
+  oc apply + oc rollout status
+  Refresh browser — header đổi màu, không error
+  (Hoặc push Git → CI/CD pipeline chạy)
+
+Scenario 5 — Business Value (3 phút)
+  Banking sector cần: resilience, compliance, time-to-market
+  OpenShift: auto-heal, auto-scale, RBAC, integrated CI/CD, hybrid cloud
+
+
+================================================================================
+PHẦN 9 — ĐỊNH NGHĨA THUẬT NGỮ (GLOSSARY)
+================================================================================
+
+  Pod          — Container nhỏ nhất chạy trên K8s/OpenShift
+  Deployment   — Quản lý số replica + rolling update của pods
+  Service      — DNS nội bộ, load balance tới pods
+  Route        — OpenShift expose app ra internet (HTTPS)
+  Namespace    — Project, không gian cô lập resources
+  Secret       — Lưu password, connection string
+  PVC          — PersistentVolumeClaim, disk gắn vào pod
+  Probe        — Health check: liveness (restart) / readiness (traffic)
+  HPA          — Horizontal Pod Autoscaler, scale theo CPU/RAM
+  ImageStream  — Registry nội bộ OpenShift lưu container images
+  BuildConfig  — Cấu hình build image từ source/Git
+  Rolling Update — Cập nhật từng pod mới, không downtime
+  S2I          — Source-to-Image (OpenShift build từ code không Dockerfile)
+  OpenShift Local — Single-node cluster trên laptop (crc CLI)
+
+
+================================================================================
+PHẦN 10 — TROUBLESHOOTING
+================================================================================
+
+Docker local:
+  - Port 5432/8000/8080 bị chiếm → đổi port trong docker-compose.yml
+  - API crash → docker compose logs banking-api
+  - DB chưa ready → đợi postgres healthcheck xanh
+
+OpenShift Local:
+  - crc start fail → chạy crc daemon ở terminal riêng
+  - Không dùng PowerShell Admin cho crc commands
+  - Cần cài trên ổ C:, Hyper-V enabled
+  - Thiếu RAM → crc config set memory 14336 && crc stop && crc start
+
+Deploy:
+  - ImagePullBackOff → chưa build image, chạy oc start-build trước
+  - CrashLoopBackOff API → check DATABASE_URL, postgres chưa ready
+  - HPA không scale → cần metrics-server (có sẵn trên OpenShift)
+  - Route không mở → oc get route -n banking-demo
+
+Rolling update demo:
+  - Đổi APP_THEME trong deployment env → apply → refresh browser
+
+
+================================================================================
+PHẦN 11 — CHECKLIST TRƯỚC INTERVIEW
+================================================================================
+
+  [ ] docker compose up --build chạy OK tại localhost:8080
+  [ ] crc start OK, oc login OK
+  [ ] App deploy OK trên OpenShift, Route accessible
+  [ ] HPA applied, load-test tăng pods
+  [ ] Rolling update demo rehearsed (blue → red theme)
+  [ ] CI/CD pipeline tested (optional nhưng impressive)
+  [ ] kubeadmin password saved
+  [ ] Backup screenshots nếu live demo fail
+
+================================================================================
+END OF INSTRUCTION
+================================================================================

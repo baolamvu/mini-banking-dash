@@ -1,0 +1,69 @@
+:root {
+  --brand-primary: #1e40af;
+  --brand-secondary: #3b82f6;
+  --brand-accent: #60a5fa;
+}
+
+body.theme-red {
+  --brand-primary: #991b1b;
+  --brand-secondary: #dc2626;
+  --brand-accent: #f87171;
+}
+
+body.theme-green {
+  --brand-primary: #166534;
+  --brand-secondary: #16a34a;
+  --brand-accent: #4ade80;
+}
+
+header {
+  background: linear-gradient(135deg, var(--brand-primary), var(--brand-secondary));
+}
+
+.stat-card {
+  border-left: 4px solid var(--brand-accent);
+}
+
+.btn-primary {
+  background-color: var(--brand-primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--brand-secondary);
+}
+
+.badge-credit {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.badge-debit {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.badge-transfer {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.health-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.health-ok {
+  background: #22c55e;
+  box-shadow: 0 0 8px #22c55e;
+}
+
+.health-error {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+}
+
+.health-loading {
+  background: #eab308;
+}
