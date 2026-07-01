@@ -29,7 +29,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Mini Banking API",
-    description="Demo API for OpenShift TAM interview",
+    description="Demo API for OpenShift",
     version=APP_VERSION,
     lifespan=lifespan,
 )
