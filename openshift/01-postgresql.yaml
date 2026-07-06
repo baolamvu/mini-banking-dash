@@ -5,10 +5,10 @@ metadata:
   namespace: banking-demo
 type: Opaque
 stringData:
-  POSTGRES_USER: banking
-  POSTGRES_PASSWORD: banking
-  POSTGRES_DB: banking
-  DATABASE_URL: postgresql://banking:banking@postgresql:5432/banking
+  POSTGRES_USER: lamvb
+  POSTGRES_PASSWORD: lam123
+  POSTGRES_DB: mini-banking
+  DATABASE_URL: postgresql://lamvb:lam123@postgresql:5432/mini-banking
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
