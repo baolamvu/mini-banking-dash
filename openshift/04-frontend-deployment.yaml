@@ -23,7 +23,7 @@ spec:
       containers:
         - name: banking-frontend
           image: banking-frontend:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           readinessProbe:
