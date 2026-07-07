@@ -23,7 +23,7 @@ spec:
       containers:
         - name: banking-api
           image: banking-api:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - containerPort: 8000
           env:
