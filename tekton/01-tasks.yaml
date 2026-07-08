@@ -1,0 +1,149 @@
+# tekton/01-tasks.yaml
+
+# ─────────────────────────────────────────
+# TASK 1: build be image
+# ─────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-backend
+  namespace: banking-demo
+spec:
+  params:
+    - name: IMAGE_TAG          # Nhận vào tag của image (commit SHA)
+      type: string
+      default: latest
+  steps:
+    - name: start-build
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+
+      script: |
+        #!/bin/bash
+        set -e   # Dừng ngay nếu có lỗi
+
+        echo "==> Starting backend build..."
+
+        # Trigger BuildConfig đã định nghĩa trong 05-buildconfigs.yaml
+        # BuildConfig sẽ tự pull code từ GitHub và build
+        oc start-build banking-api \
+          -n banking-demo \
+          --follow \           # Đợi và stream log build
+          --wait               # Exit code != 0 nếu build fail
+
+        echo "==> Backend build completed!"
+
+        # Tag image với commit SHA để traceable
+        oc tag banking-demo/banking-api:latest \
+               banking-demo/banking-api:$(params.IMAGE_TAG)
+
+        echo "==> Tagged as $(params.IMAGE_TAG)"
+
+---
+# ─────────────────────────────────────────
+# TASK 2: build fe image
+# ─────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-frontend
+  namespace: banking-demo
+spec:
+  params:
+    - name: IMAGE_TAG
+      type: string
+      default: latest
+  steps:
+    - name: start-build
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Starting frontend build..."
+
+        oc start-build banking-frontend \
+          -n banking-demo \
+          --follow \
+          --wait
+
+        echo "==> Frontend build completed!"
+
+        oc tag banking-demo/banking-frontend:latest \
+               banking-demo/banking-frontend:$(params.IMAGE_TAG)
+
+---
+# ─────────────────────────────────────────
+# TASK 3: deploy và verify
+# ─────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-and-verify
+  namespace: banking-demo
+spec:
+  params:
+    - name: IMAGE_TAG
+      type: string
+      default: latest
+  steps:
+    # Step 1: Cập nhật image tag trong Deployment
+    - name: update-image
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Updating deployment images..."
+
+        # Patch Deployment dùng image với tag cụ thể
+        # Tốt hơn dùng :latest vì biết chính xác version nào đang chạy
+        oc set image deployment/banking-api \
+          banking-api=image-registry.openshift-image-registry.svc:5000/banking-demo/banking-api:$(params.IMAGE_TAG) \
+          -n banking-demo
+
+        oc set image deployment/banking-frontend \
+          banking-frontend=image-registry.openshift-image-registry.svc:5000/banking-demo/banking-frontend:$(params.IMAGE_TAG) \
+          -n banking-demo
+
+    # Step 2: Đợi rolling update hoàn thành
+    - name: wait-rollout
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Waiting for backend rollout..."
+        oc rollout status deployment/banking-api \
+          -n banking-demo \
+          --timeout=180s     # Timeout 3 phút
+
+        echo "==> Waiting for frontend rollout..."
+        oc rollout status deployment/banking-frontend \
+          -n banking-demo \
+          --timeout=120s
+
+        echo "==> All rollouts completed!"
+
+    # Step 3: Smoke test — kiểm tra app còn sống sau deploy
+    - name: smoke-test
+      image: curlimages/curl:latest    # Image nhỏ chỉ có curl
+      script: |
+        #!/bin/sh
+        set -e
+
+        echo "==> Running smoke test..."
+
+        # Gọi health endpoint qua Service nội bộ (không cần Route)
+        # Thử 5 lần, mỗi lần cách nhau 5 giây
+        for i in 1 2 3 4 5; do
+          echo "Attempt $i..."
+          if curl -sf http://banking-api.banking-demo.svc.cluster.local:8000/health; then
+            echo ""
+            echo "==> Smoke test PASSED!"
+            exit 0
+          fi
+          sleep 5
+        done
+
+        echo "==> Smoke test FAILED after 5 attempts!"
+        exit 1

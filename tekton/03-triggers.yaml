@@ -1,0 +1,94 @@
+# tekton/03-triggers.yaml
+
+# ── PHẦN 1: TriggerBinding ──
+# Đọc data từ GitHub webhook payload
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: banking-demo
+spec:
+  params:
+    # GitHub gửi JSON payload, ta đọc các field cần thiết
+    - name: GIT_COMMIT
+      value: $(body.after)              # SHA của commit mới nhất
+    - name: GIT_BRANCH
+      value: $(body.ref)                # Ví dụ: refs/heads/main
+
+---
+# ── PHẦN 2: TriggerTemplate ──
+# Tạo PipelineRun khi có event
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: banking-pipeline-template
+  namespace: banking-demo
+spec:
+  params:
+    - name: GIT_COMMIT
+      default: latest
+    - name: GIT_BRANCH
+      default: main
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun              # Tạo 1 PipelineRun mới mỗi lần push
+      metadata:
+        generateName: banking-deploy-  # Tên tự động: banking-deploy-abc123
+        namespace: banking-demo
+      spec:
+        pipelineRef:
+          name: banking-deploy-pipeline
+        serviceAccountName: pipeline-sa  # Dùng SA đã tạo ở bước 2
+        params:
+          - name: GIT_COMMIT
+            value: $(tt.params.GIT_COMMIT)
+          - name: GIT_BRANCH
+            value: $(tt.params.GIT_BRANCH)
+        timeouts:
+          pipeline: 30m              # Timeout toàn pipeline: 30 phút
+
+---
+# ── PHẦN 3: EventListener ──
+# Pod lắng nghe webhook từ GitHub
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-event-listener
+  namespace: banking-demo
+spec:
+  serviceAccountName: pipeline-sa
+  triggers:
+    - name: github-push-trigger
+      interceptors:
+        # Chỉ xử lý push lên branch main
+        - ref:
+            name: cel               # CEL = Common Expression Language
+          params:
+            - name: filter
+              value: >
+                body.ref == 'refs/heads/main' &&
+                body.commits.size() > 0
+                # ↑ Bỏ qua nếu không phải main hoặc không có commit mới
+      bindings:
+        - ref: github-push-binding  # Dùng binding đã định nghĩa
+      template:
+        ref: banking-pipeline-template  # Dùng template đã định nghĩa
+
+---
+# ── PHẦN 4: Route cho EventListener ──
+# Expose EventListener ra ngoài để GitHub gọi được
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: github-webhook
+  namespace: banking-demo
+spec:
+  to:
+    kind: Service
+    name: el-github-event-listener   # Service tự tạo bởi EventListener
+    # "el-" là prefix Tekton tự thêm
+  port:
+    targetPort: http-listener         # Port 8080 của EventListener
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

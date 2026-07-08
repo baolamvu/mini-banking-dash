@@ -1,0 +1,15 @@
+# tekton/04-pipelinerun-manual.yaml
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: banking-deploy-manual-001   # Đổi số mỗi lần chạy
+  namespace: banking-demo
+spec:
+  pipelineRef:
+    name: banking-deploy-pipeline
+  serviceAccountName: pipeline-sa
+  params:
+    - name: GIT_COMMIT
+      value: manual-test            # Tag image là "manual-test"
+    - name: GIT_BRANCH
+      value: main
