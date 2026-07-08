@@ -20,7 +20,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/YOUR_USERNAME/mini-banking-dash.git
+      uri: https://github.com/baolamvu/mini-banking-dash.git
       ref: main
     contextDir: backend
   strategy:
@@ -52,7 +52,7 @@ spec:
   source:
     type: Git
     git:
-      uri: https://github.com/YOUR_USERNAME/mini-banking-dash.git
+      uri: https://github.com/baolamvu/mini-banking-dash.git
       ref: main
     contextDir: frontend
   strategy:
