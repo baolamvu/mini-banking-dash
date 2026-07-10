@@ -9,11 +9,10 @@ metadata:
   namespace: banking-demo
 spec:
   params:
-    # GitHub gửi JSON payload, ta đọc các field cần thiết
     - name: GIT_COMMIT
-      value: $(body.after)              # SHA của commit mới nhất
+      value: $(body.after)
     - name: GIT_BRANCH
-      value: $(body.ref)                # Ví dụ: refs/heads/main
+      value: $(body.ref)
 
 ---
 # ── PHẦN 2: TriggerTemplate ──
@@ -31,25 +30,25 @@ spec:
       default: main
   resourcetemplates:
     - apiVersion: tekton.dev/v1
-      kind: PipelineRun              # Tạo 1 PipelineRun mới mỗi lần push
+      kind: PipelineRun
       metadata:
-        generateName: banking-deploy-  # Tên tự động: banking-deploy-abc123
+        generateName: banking-deploy-
         namespace: banking-demo
       spec:
         pipelineRef:
           name: banking-deploy-pipeline
-        serviceAccountName: pipeline-sa  # Dùng SA đã tạo ở bước 2
+        serviceAccountName: pipeline-sa
         params:
           - name: GIT_COMMIT
             value: $(tt.params.GIT_COMMIT)
           - name: GIT_BRANCH
             value: $(tt.params.GIT_BRANCH)
         timeouts:
-          pipeline: 30m              # Timeout toàn pipeline: 30 phút
+          pipeline: 30m
 
 ---
 # ── PHẦN 3: EventListener ──
-# Pod lắng nghe webhook từ GitHub
+# Pod listen webhook từ GitHub
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
@@ -60,19 +59,17 @@ spec:
   triggers:
     - name: github-push-trigger
       interceptors:
-        # Chỉ xử lý push lên branch main
         - ref:
-            name: cel               # CEL = Common Expression Language
+            name: cel
           params:
             - name: filter
               value: >
                 body.ref == 'refs/heads/main' &&
                 body.commits.size() > 0
-                # ↑ Bỏ qua nếu không phải main hoặc không có commit mới
       bindings:
-        - ref: github-push-binding  # Dùng binding đã định nghĩa
+        - ref: github-push-binding
       template:
-        ref: banking-pipeline-template  # Dùng template đã định nghĩa
+        ref: banking-pipeline-template
 
 ---
 # ── PHẦN 4: Route cho EventListener ──
@@ -85,10 +82,9 @@ metadata:
 spec:
   to:
     kind: Service
-    name: el-github-event-listener   # Service tự tạo bởi EventListener
-    # "el-" là prefix Tekton tự thêm
+    name: el-github-event-listener
   port:
-    targetPort: http-listener         # Port 8080 của EventListener
+    targetPort: http-listener
   tls:
     termination: edge
     insecureEdgeTerminationPolicy: Redirect

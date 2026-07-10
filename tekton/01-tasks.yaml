@@ -10,7 +10,7 @@ metadata:
   namespace: banking-demo
 spec:
   params:
-    - name: IMAGE_TAG          # Nhận vào tag của image (commit SHA)
+    - name: IMAGE_TAG
       type: string
       default: latest
   steps:
@@ -23,16 +23,13 @@ spec:
 
         echo "==> Starting backend build..."
 
-        # Trigger BuildConfig đã định nghĩa trong 05-buildconfigs.yaml
-        # BuildConfig sẽ tự pull code từ GitHub và build
         oc start-build banking-api \
           -n banking-demo \
-          --follow \           # Đợi và stream log build
-          --wait               # Exit code != 0 nếu build fail
+          --follow \
+          --wait
 
         echo "==> Backend build completed!"
 
-        # Tag image với commit SHA để traceable
         oc tag banking-demo/banking-api:latest \
                banking-demo/banking-api:$(params.IMAGE_TAG)
 
@@ -95,8 +92,6 @@ spec:
 
         echo "==> Updating deployment images..."
 
-        # Patch Deployment dùng image với tag cụ thể
-        # Tốt hơn dùng :latest vì biết chính xác version nào đang chạy
         oc set image deployment/banking-api \
           banking-api=image-registry.openshift-image-registry.svc:5000/banking-demo/banking-api:$(params.IMAGE_TAG) \
           -n banking-demo
@@ -115,7 +110,7 @@ spec:
         echo "==> Waiting for backend rollout..."
         oc rollout status deployment/banking-api \
           -n banking-demo \
-          --timeout=180s     # Timeout 3 phút
+          --timeout=180s
 
         echo "==> Waiting for frontend rollout..."
         oc rollout status deployment/banking-frontend \
@@ -124,17 +119,15 @@ spec:
 
         echo "==> All rollouts completed!"
 
-    # Step 3: Smoke test — kiểm tra app còn sống sau deploy
+    # Step 3: Smoke test
     - name: smoke-test
-      image: curlimages/curl:latest    # Image nhỏ chỉ có curl
+      image: curlimages/curl:latest
       script: |
         #!/bin/sh
         set -e
 
         echo "==> Running smoke test..."
 
-        # Gọi health endpoint qua Service nội bộ (không cần Route)
-        # Thử 5 lần, mỗi lần cách nhau 5 giây
         for i in 1 2 3 4 5; do
           echo "Attempt $i..."
           if curl -sf http://banking-api.banking-demo.svc.cluster.local:8000/health; then

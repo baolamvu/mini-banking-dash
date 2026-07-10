@@ -2,7 +2,7 @@
 apiVersion: tekton.dev/v1
 kind: PipelineRun
 metadata:
-  name: banking-deploy-manual-001   # Đổi số mỗi lần chạy
+  generateName: banking-deploy-manual-
   namespace: banking-demo
 spec:
   pipelineRef:
@@ -10,6 +10,6 @@ spec:
   serviceAccountName: pipeline-sa
   params:
     - name: GIT_COMMIT
-      value: manual-test            # Tag image là "manual-test"
+      value: manual-test
     - name: GIT_BRANCH
       value: main
