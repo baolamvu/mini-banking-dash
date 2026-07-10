@@ -5,9 +5,9 @@ metadata:
   namespace: banking-demo
 type: Opaque
 stringData:
-  POSTGRES_USER: lamvb
-  POSTGRES_PASSWORD: lam123
-  POSTGRES_DB: mini-banking
+  POSTGRESQL_USER: lamvb
+  POSTGRESQL_PASSWORD: lam123
+  POSTGRESQL_DATABASE: mini-banking
   DATABASE_URL: postgresql://lamvb:lam123@postgresql:5432/mini-banking
 ---
 apiVersion: v1
