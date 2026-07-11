@@ -7,6 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+
+RUN mkdir -p /.cache && \
+    chown -R 1001:0 /app /.cache && \
+    chmod -R g+rwx /app /.cache
+
+USER 1001
+
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
