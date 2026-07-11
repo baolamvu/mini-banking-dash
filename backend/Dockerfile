@@ -8,9 +8,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY requirements.txt .
 
-RUN mkdir -p /.cache && \
-    chown -R 1001:0 /app /.cache && \
-    chmod -R g+rwx /app /.cache
+RUN mkdir -p /app/.cache /app/.local && \
+    chown -R 1001:0 /app && \
+    chmod -R g+rwx /app
+
+ENV HOME=/app
+ENV PIP_CACHE_DIR=/app/.cache
 
 USER 1001
 
