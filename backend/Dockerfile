@@ -17,6 +17,8 @@ ENV PIP_CACHE_DIR=/app/.cache
 
 USER 1001
 
+ENV PATH="/app/.local/bin:${PATH}"
+
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
