@@ -12,7 +12,7 @@ echo "Watch pods scale: oc get pods -n banking-demo -w"
 if command -v hey &> /dev/null; then
   hey -z "${DURATION}s" -c 20 -q 10 -m POST "${URL}/api/transactions/generate"
 elif command -v ab &> /dev/null; then
-  ab -n 1000 -c 20 -t "$DURATION" "${URL}/api/transactions/generate"
+  ab -k -n 3000 -c 10 -t "$DURATION" -p tmp/empty_body.txt -T "application/json" "${URL}/api/transactions/generate"
 else
   echo "Install 'hey' or 'apache2-utils' (ab) for load testing."
   echo "Fallback: curl loop..."
