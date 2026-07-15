@@ -5,7 +5,6 @@ metadata:
   name: banking-deploy-pipeline
   namespace: banking-demo
 spec:
-  # Params Pipeline nhận từ bên ngoài (từ Trigger hoặc manual run)
   params:
     - name: GIT_COMMIT
       type: string
@@ -17,15 +16,12 @@ spec:
       default: main
 
   tasks:
-    # ── Task 1 và 2 chạy SONG SONG ──
-    # (không có runAfter → Tekton tự chạy đồng thời)
-
-    - name: build-backend          # Tên instance task trong pipeline
+    - name: build-backend
       taskRef:
-        name: build-backend        # Trỏ tới Task đã định nghĩa
+        name: build-backend
       params:
         - name: IMAGE_TAG
-          value: $(params.GIT_COMMIT)   # Truyền commit SHA vào Task
+          value: $(params.GIT_COMMIT)
 
     - name: build-frontend
       taskRef:
@@ -34,7 +30,6 @@ spec:
         - name: IMAGE_TAG
           value: $(params.GIT_COMMIT)
 
-    # ── Task 3 chạy SAU KHI cả 2 build xong ──
     - name: deploy-and-verify
       taskRef:
         name: deploy-and-verify
@@ -42,5 +37,71 @@ spec:
         - name: IMAGE_TAG
           value: $(params.GIT_COMMIT)
       runAfter:
-        - build-backend             # Phải đợi task này xong
-        - build-frontend            # Và task này xong
+        - build-backend
+        - build-frontend
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: banking-backend-deploy-pipeline
+  namespace: banking-demo
+spec:
+  params:
+    - name: GIT_COMMIT
+      type: string
+      description: Git commit SHA, dùng làm image tag
+      default: latest
+    - name: GIT_BRANCH
+      type: string
+      description: Git branch name
+      default: main
+
+  tasks:
+    - name: build-backend
+      taskRef:
+        name: build-backend
+      params:
+        - name: IMAGE_TAG
+          value: $(params.GIT_COMMIT)
+
+    - name: deploy-and-verify-backend
+      taskRef:
+        name: deploy-and-verify-backend
+      params:
+        - name: IMAGE_TAG
+          value: $(params.GIT_COMMIT)
+      runAfter:
+        - build-backend
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: banking-frontend-deploy-pipeline
+  namespace: banking-demo
+spec:
+  params:
+    - name: GIT_COMMIT
+      type: string
+      description: Git commit SHA, dùng làm image tag
+      default: latest
+    - name: GIT_BRANCH
+      type: string
+      description: Git branch name
+      default: main
+
+  tasks:
+    - name: build-frontend
+      taskRef:
+        name: build-frontend
+      params:
+        - name: IMAGE_TAG
+          value: $(params.GIT_COMMIT)
+
+    - name: deploy-and-verify-frontend
+      taskRef:
+        name: deploy-and-verify-frontend
+      params:
+        - name: IMAGE_TAG
+          value: $(params.GIT_COMMIT)
+      runAfter:
+        - build-frontend

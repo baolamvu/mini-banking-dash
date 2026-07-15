@@ -140,3 +140,107 @@ spec:
 
         echo "==> Smoke test FAILED after 5 attempts!"
         exit 1
+---
+# ─────────────────────────────────────────
+# TASK 4: deploy và verify backend
+# ─────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-and-verify-backend
+  namespace: banking-demo
+spec:
+  params:
+    - name: IMAGE_TAG
+      type: string
+      default: latest
+  steps:
+    # Step 1: Cập nhật image tag trong Deployment
+    - name: update-image
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Updating backend deployment images..."
+
+        oc set image deployment/banking-api \
+          banking-api=image-registry.openshift-image-registry.svc:5000/banking-demo/banking-api:$(params.IMAGE_TAG) \
+          -n banking-demo
+
+    # Step 2: Đợi rolling update hoàn thành
+    - name: wait-rollout
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Waiting for backend rollout..."
+        oc rollout status deployment/banking-api \
+          -n banking-demo \
+          --timeout=180s
+
+        echo "==> backend rollouts completed!"
+
+    # Step 3: Smoke test
+    - name: smoke-test
+      image: curlimages/curl:latest
+      script: |
+        #!/bin/sh
+        set -e
+
+        echo "==> Running smoke test..."
+
+        for i in 1 2 3 4 5; do
+          echo "Attempt $i..."
+          if curl -sf http://banking-api.banking-demo.svc.cluster.local:8000/health; then
+            echo ""
+            echo "==> Smoke test PASSED!"
+            exit 0
+          fi
+          sleep 5
+        done
+
+        echo "==> Smoke test FAILED after 5 attempts!"
+        exit 1
+---
+# ─────────────────────────────────────────
+# TASK 5: deploy và verify frontend
+# ─────────────────────────────────────────
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: deploy-and-verify-frontend
+  namespace: banking-demo
+spec:
+  params:
+    - name: IMAGE_TAG
+      type: string
+      default: latest
+  steps:
+    # Step 1: Cập nhật image tag trong Deployment
+    - name: update-image
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Updating frontend deployment images..."
+
+        oc set image deployment/banking-frontend \
+          banking-frontend=image-registry.openshift-image-registry.svc:5000/banking-demo/banking-frontend:$(params.IMAGE_TAG) \
+          -n banking-demo
+
+    # Step 2: Đợi rolling update hoàn thành
+    - name: wait-rollout
+      image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        echo "==> Waiting for frontend rollout..."
+        oc rollout status deployment/banking-frontend \
+          -n banking-demo \
+          --timeout=120s
+
+        echo "==> frontend rollouts completed!"

@@ -1,7 +1,4 @@
 # tekton/03-triggers.yaml
-
-# ── PHẦN 1: TriggerBinding ──
-# Đọc data từ GitHub webhook payload
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerBinding
 metadata:
@@ -15,12 +12,10 @@ spec:
       value: $(body.ref)
 
 ---
-# ── PHẦN 2: TriggerTemplate ──
-# Tạo PipelineRun khi có event
 apiVersion: triggers.tekton.dev/v1beta1
 kind: TriggerTemplate
 metadata:
-  name: banking-pipeline-template
+  name: banking-both-template
   namespace: banking-demo
 spec:
   params:
@@ -32,7 +27,7 @@ spec:
     - apiVersion: tekton.dev/v1
       kind: PipelineRun
       metadata:
-        generateName: banking-deploy-
+        generateName: banking-both-deploy-
         namespace: banking-demo
       spec:
         pipelineRef:
@@ -43,12 +38,64 @@ spec:
             value: $(tt.params.GIT_COMMIT)
           - name: GIT_BRANCH
             value: $(tt.params.GIT_BRANCH)
-        timeouts:
-          pipeline: 30m
 
 ---
-# ── PHẦN 3: EventListener ──
-# Pod listen webhook từ GitHub
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: banking-backend-template
+  namespace: banking-demo
+spec:
+  params:
+    - name: GIT_COMMIT
+      default: latest
+    - name: GIT_BRANCH
+      default: main
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: banking-backend-deploy-
+        namespace: banking-demo
+      spec:
+        pipelineRef:
+          name: banking-backend-deploy-pipeline
+        serviceAccountName: pipeline-sa
+        params:
+          - name: GIT_COMMIT
+            value: $(tt.params.GIT_COMMIT)
+          - name: GIT_BRANCH
+            value: $(tt.params.GIT_BRANCH)
+
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: banking-frontend-template
+  namespace: banking-demo
+spec:
+  params:
+    - name: GIT_COMMIT
+      default: latest
+    - name: GIT_BRANCH
+      default: main
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: banking-frontend-deploy-
+        namespace: banking-demo
+      spec:
+        pipelineRef:
+          name: banking-frontend-deploy-pipeline
+        serviceAccountName: pipeline-sa
+        params:
+          - name: GIT_COMMIT
+            value: $(tt.params.GIT_COMMIT)
+          - name: GIT_BRANCH
+            value: $(tt.params.GIT_BRANCH)
+
+---
 apiVersion: triggers.tekton.dev/v1beta1
 kind: EventListener
 metadata:
@@ -57,23 +104,54 @@ metadata:
 spec:
   serviceAccountName: pipeline-sa
   triggers:
-    - name: github-push-trigger
+    - name: trigger-both
       interceptors:
         - ref:
             name: cel
           params:
             - name: filter
               value: >
-                body.ref == 'refs/heads/main' &&
-                body.commits.size() > 0
+                body.ref == 'refs/heads/main' && body.commits.size() > 0 &&
+                (
+                  (body.commits.exists(c, c.added.exists(f, f.startsWith('backend/')) || c.modified.exists(f, f.startsWith('backend/')) || c.removed.exists(f, f.startsWith('backend/')))) &&
+                  (body.commits.exists(c, c.added.exists(f, f.startsWith('frontend/')) || c.modified.exists(f, f.startsWith('frontend/')) || c.removed.exists(f, f.startsWith('frontend/'))))
+                )
       bindings:
         - ref: github-push-binding
       template:
-        ref: banking-pipeline-template
+        ref: banking-both-template
+
+    - name: trigger-backend-only
+      interceptors:
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: >
+                body.ref == 'refs/heads/main' && body.commits.size() > 0 &&
+                (body.commits.exists(c, c.added.exists(f, f.startsWith('backend/')) || c.modified.exists(f, f.startsWith('backend/')) || c.removed.exists(f, f.startsWith('backend/')))) &&
+                !(body.commits.exists(c, c.added.exists(f, f.startsWith('frontend/')) || c.modified.exists(f, f.startsWith('frontend/')) || c.removed.exists(f, f.startsWith('frontend/'))))
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: banking-backend-template
+
+    - name: trigger-frontend-only
+      interceptors:
+        - ref:
+            name: cel
+          params:
+            - name: filter
+              value: >
+                body.ref == 'refs/heads/main' && body.commits.size() > 0 &&
+                !(body.commits.exists(c, c.added.exists(f, f.startsWith('backend/')) || c.modified.exists(f, f.startsWith('backend/')) || c.removed.exists(f, f.startsWith('backend/')))) &&
+                (body.commits.exists(c, c.added.exists(f, f.startsWith('frontend/')) || c.modified.exists(f, f.startsWith('frontend/')) || c.removed.exists(f, f.startsWith('frontend/'))))
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: banking-frontend-template
 
 ---
-# ── PHẦN 4: Route cho EventListener ──
-# Expose EventListener ra ngoài để GitHub gọi được
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
