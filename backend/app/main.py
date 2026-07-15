@@ -53,7 +53,7 @@ def ready(db: Session = Depends(get_db)):
     db.execute(text("SELECT 1"))
     return {"status": "ready", "database": "connected"}
 
-
+#general data
 @app.get("/metrics")
 def metrics(db: Session = Depends(get_db)):
     count = db.query(Transaction).count()
